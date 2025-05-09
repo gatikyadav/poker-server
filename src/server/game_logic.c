@@ -14,8 +14,8 @@
 #include "logs.h"
 
 // Global variables to track game state
-player_id_t g_dealer = 0;
-player_id_t g_player_turn = 1;
+player_id_t g_dealer = 0;  // Always start with player 0 as dealer
+player_id_t g_player_turn = 1;  // Player 1 goes first
 int g_bet_size = 0;
 int g_player_bets[MAX_PLAYERS] = {0};
 
@@ -77,7 +77,7 @@ void print_game_state(game_state_t *game) {
     }
 }
 
-void init_deck(card_t deck[DECK_SIZE], int seed){ //DO NOT TOUCH THIS FUNCTION
+void init_deck(card_t deck[DECK_SIZE], int seed) { //DO NOT TOUCH THIS FUNCTION
     srand(seed);
     int i = 0;
     for(int r = 0; r<13; r++){
@@ -87,7 +87,7 @@ void init_deck(card_t deck[DECK_SIZE], int seed){ //DO NOT TOUCH THIS FUNCTION
     }
 }
 
-void shuffle_deck(card_t deck[DECK_SIZE]){ //DO NOT TOUCH THIS FUNCTION
+void shuffle_deck(card_t deck[DECK_SIZE]) { //DO NOT TOUCH THIS FUNCTION
     for(int i = 0; i<DECK_SIZE; i++){
         int j = rand() % DECK_SIZE;
         card_t temp = deck[i];
@@ -116,6 +116,7 @@ void init_game_state(game_state_t *game, int starting_stack, int random_seed) {
         set_socket_blocking(game->sockets[i]);
     }
     
+    // Initialize the deck as specified in the assignment
     init_deck(game->deck, random_seed);
     shuffle_deck(game->deck);
     
@@ -131,8 +132,10 @@ void init_game_state(game_state_t *game, int starting_stack, int random_seed) {
         game->community_cards[i] = NOCARD;
     }
     
-    // Initialize global variables
+    // Initialize global variables as per assignment requirements
+    // "At the start of the game, player 0 should always be the dealer"
     g_dealer = 0;
+    // "Every time new cards are added to the community, player 1 should be the first player to take a turn"
     g_player_turn = 1;
     g_bet_size = 0;
     memset(g_player_bets, 0, sizeof(g_player_bets));
@@ -183,6 +186,7 @@ void reset_game_state(game_state_t *game) {
     }
     
     // Set dealer to next active player
+    // "After the first hand is over the dealer should be the next player in turn"
     player_id_t next_dealer = (g_dealer + 1) % MAX_PLAYERS;
     while (game->player_status[next_dealer] != PLAYER_ACTIVE) {
         next_dealer = (next_dealer + 1) % MAX_PLAYERS;
@@ -308,6 +312,11 @@ int server_ready(game_state_t *game) {
 }
 
 void server_deal(game_state_t *game) {
+    // Deal cards in player order as specified in the assignment:
+    // "To standardize the behavior of our servers when you are dealing cards deal 2 cards to the
+    // lowest numbered player who is "ready" first. Then move around the table to the next lowest
+    // numbered player and give them 2 cards."
+    
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (game->player_status[i] == PLAYER_ACTIVE) {
             game->player_hands[i][0] = game->deck[game->next_card++];
@@ -458,6 +467,8 @@ void server_community(game_state_t *game) {
     }
     
     // Deal appropriate cards based on current state
+    // As per assignment: "When dealing the 5 community cards, they should be
+    // the next 5 cards in order (from the deck) after all "ready" players have been given 2 cards."
     if (card_count == 0) {
         // Deal the flop (3 cards)
         game->community_cards[0] = game->deck[game->next_card++];
@@ -517,6 +528,7 @@ int find_winner(game_state_t *game) {
     }
     
     // For a simple implementation, just return the first active player
+    // In a real poker game, you would evaluate hands here
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (game->player_status[i] == PLAYER_ACTIVE) {
             return i;
