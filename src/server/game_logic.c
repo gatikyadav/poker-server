@@ -326,6 +326,13 @@ int server_ready(game_state_t *game) {
             close(game->sockets[i]);
             game->sockets[i] = -1;
             log_info("[Server] Player %d left", i);
+        } else if (packet.packet_type == CHECK || packet.packet_type == CALL || 
+                  packet.packet_type == RAISE || packet.packet_type == FOLD) {
+            // These are game action packets that might arrive if client is out of sync
+            // We'll treat these as READY for robustness
+            game->player_status[i] = PLAYER_ACTIVE;
+            active_players++;
+            log_info("[Server] Received game action packet from player %d, treating as READY", i);
         } else {
             log_err("Unexpected packet type from player %d: %d", i, packet.packet_type);
             // Try to handle it gracefully - assume READY if not LEAVE
@@ -464,8 +471,34 @@ int server_bet(game_state_t *game) {
             close(game->sockets[current_player]);
             game->sockets[current_player] = -1;
             
+            // Recount active players
+            active_players = 0;
+            for (int i = 0; i < MAX_PLAYERS; i++) {
+                if (game->player_status[i] == PLAYER_ACTIVE) {
+                    active_players++;
+                }
+            }
+            
+            // If only one player left active, end betting
+            if (active_players <= 1) {
+                log_info("Only one active player remains after disconnect, ending betting round");
+                return 1;
+            }
+            
             // Find the next active player
+            player_id_t prev_player = current_player;
             current_player = (current_player + 1) % MAX_PLAYERS;
+            int count = 0;
+            
+            while ((game->player_status[current_player] != PLAYER_ACTIVE || game->sockets[current_player] <= 0) && count < MAX_PLAYERS) {
+                current_player = (current_player + 1) % MAX_PLAYERS;
+                count++;
+                
+                if (count >= MAX_PLAYERS) {
+                    log_err("No active players found after trying all players");
+                    return 1;
+                }
+            }
             continue;
         }
         
@@ -485,8 +518,34 @@ int server_bet(game_state_t *game) {
             close(game->sockets[current_player]);
             game->sockets[current_player] = -1;
             
+            // Recount active players
+            active_players = 0;
+            for (int i = 0; i < MAX_PLAYERS; i++) {
+                if (game->player_status[i] == PLAYER_ACTIVE) {
+                    active_players++;
+                }
+            }
+            
+            // If only one player left active, end betting
+            if (active_players <= 1) {
+                log_info("Only one active player remains after failed ACK/NACK, ending betting round");
+                return 1;
+            }
+            
             // Find the next active player
+            player_id_t prev_player = current_player;
             current_player = (current_player + 1) % MAX_PLAYERS;
+            int count = 0;
+            
+            while ((game->player_status[current_player] != PLAYER_ACTIVE || game->sockets[current_player] <= 0) && count < MAX_PLAYERS) {
+                current_player = (current_player + 1) % MAX_PLAYERS;
+                count++;
+                
+                if (count >= MAX_PLAYERS) {
+                    log_err("No active players found after trying all players");
+                    return 1;
+                }
+            }
             continue;
         }
         
@@ -494,6 +553,18 @@ int server_bet(game_state_t *game) {
             // Valid action, move to next player
             player_id_t prev_player = current_player;
             current_player = (current_player + 1) % MAX_PLAYERS;
+            
+            // Skip inactive players
+            int count = 0;
+            while ((game->player_status[current_player] != PLAYER_ACTIVE || game->sockets[current_player] <= 0) && count < MAX_PLAYERS) {
+                current_player = (current_player + 1) % MAX_PLAYERS;
+                count++;
+                
+                if (count >= MAX_PLAYERS) {
+                    log_err("No next active player found");
+                    return 1;
+                }
+            }
             
             // Check if we've completed one full round
             if (current_player == start_player) {
@@ -505,6 +576,7 @@ int server_bet(game_state_t *game) {
             for (int i = 0; i < MAX_PLAYERS; i++) {
                 if (game->player_status[i] == PLAYER_ACTIVE) {
                     active_players++;
+                    log_info("Player %d is active", i);
                 }
             }
             
@@ -514,10 +586,7 @@ int server_bet(game_state_t *game) {
                 return 1;
             }
             
-            // Check if betting round is complete - this is CRITICAL
-            // A betting round is complete when:
-            // 1. Every player has had at least one chance to act (all_players_acted is true)
-            // 2. All active players have equal bets (check_betting_end returns true)
+            // Check if betting round is complete
             if (all_players_acted && check_betting_end(game)) {
                 log_info("Betting round complete, all players have matched bets");
                 betting_complete = 1;
@@ -526,10 +595,13 @@ int server_bet(game_state_t *game) {
     }
     
     // Add all bets to pot
+    log_info("Adding bets to pot: current pot=%d", game->pot_size);
     for (int i = 0; i < MAX_PLAYERS; i++) {
+        log_info("Player %d bet: %d", i, g_player_bets[i]);
         game->pot_size += g_player_bets[i];
         g_player_bets[i] = 0;
     }
+    log_info("New pot size: %d", game->pot_size);
     g_bet_size = 0;
     
     // Reset player turn to player after dealer for next betting round
@@ -566,6 +638,7 @@ int check_betting_end(game_state_t *game) {
     // Check if all active players have equal bets
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (game->player_status[i] == PLAYER_ACTIVE) {
+            log_info("Player %d bet: %d, first_bet: %d", i, g_player_bets[i], first_bet);
             if (g_player_bets[i] != first_bet) {
                 all_equal = 0;
                 break;
@@ -573,6 +646,7 @@ int check_betting_end(game_state_t *game) {
         }
     }
     
+    log_info("check_betting_end: all bets equal? %s", all_equal ? "yes" : "no");
     return all_equal;
 }
 

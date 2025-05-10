@@ -175,6 +175,14 @@ int main(int argc, char **argv) {
         
         log_info("Starting new hand, dealer: %d, player_turn: %d", g_dealer, g_player_turn);
         
+        // Reset pot size at the beginning of each hand
+        game.pot_size = 0;
+        
+        // Reset all player bets
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            g_player_bets[i] = 0;
+        }
+        
         // DEAL TO PLAYERS
         server_deal(&game);
         log_info("Cards dealt to players");

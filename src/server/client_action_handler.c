@@ -36,7 +36,7 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
     switch (in->packet_type) {
         case CHECK: {
             // Check is only valid if the current bet is 0
-            if (g_bet_size > 0) {
+            if (g_bet_size > g_player_bets[pid]) {
                 out->packet_type = NACK;
                 log_info("NACK: Player %d cannot check, bet size is %d", pid, g_bet_size);
                 return -1;
@@ -47,7 +47,7 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
             
         case CALL: {
             // Call is valid only if there's a bet to match
-            if (g_bet_size == 0) {
+            if (g_bet_size == 0 || g_bet_size <= g_player_bets[pid]) {
                 out->packet_type = NACK;
                 log_info("NACK: Player %d cannot call, no bet to match", pid);
                 return -1;
