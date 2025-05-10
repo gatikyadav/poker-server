@@ -14,10 +14,14 @@ extern int g_bet_size;
 extern int g_player_bets[MAX_PLAYERS];
 
 int handle_client_action(game_state_t *game, player_id_t pid, const client_packet_t *in, server_packet_t *out) {
+    // Log the current game state for debugging
+    log_info("handle_client_action: Current dealer=%d, player_turn=%d, bet_size=%d", 
+             g_dealer, g_player_turn, g_bet_size);
+    
     // Check if it's the player's turn
     if (pid != g_player_turn) {
         out->packet_type = NACK;
-        log_info("NACK: Not player %d's turn", pid);
+        log_info("NACK: Not player %d's turn, current turn is player %d", pid, g_player_turn);
         return -1;
     }
     

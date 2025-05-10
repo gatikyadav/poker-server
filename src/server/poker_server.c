@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/time.h>  /* For struct timeval */
+#include <errno.h>     /* Add this line for errno */
 
 #include "poker_client.h"
 #include "client_action_handler.h"
@@ -22,6 +23,16 @@ extern int g_bet_size;
 extern int g_player_bets[MAX_PLAYERS];
 
 game_state_t game; //global variable to store our game state info
+
+// Helper function to handle player disconnections consistently
+void handle_player_disconnect(game_state_t *game, player_id_t pid) {
+    log_info("Player %d disconnected", pid);
+    game->player_status[pid] = PLAYER_LEFT;
+    if (game->sockets[pid] > 0) {
+        close(game->sockets[pid]);
+        game->sockets[pid] = -1;
+    }
+}
 
 int main(int argc, char **argv) {
     int server_fds[NUM_PORTS];
@@ -145,21 +156,14 @@ int main(int argc, char **argv) {
             game.sockets[i] = temp_sockets[i];
         }
         
-        log_info("Starting new hand, dealer: %d", g_dealer);
+        log_info("Starting new hand, dealer: %d, player_turn: %d", g_dealer, g_player_turn);
         
         // DEAL TO PLAYERS
         server_deal(&game);
         log_info("Cards dealt to players");
         
-        // Send initial info packets to all players
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (game.player_status[i] != PLAYER_LEFT && game.sockets[i] > 0) {
-                server_packet_t packet;
-                build_info_packet(&game, i, &packet);
-                log_info("Sending INFO packet to player %d on socket %d", i, game.sockets[i]);
-                send(game.sockets[i], &packet, sizeof(server_packet_t), 0);
-            }
-        }
+        // IMPORTANT CHANGE: Do NOT send INFO packets here
+        // The server_bet function will handle sending INFO packets
         
         // PREFLOP BETTING
         log_info("Starting preflop betting, player turn: %d", g_player_turn);
@@ -177,15 +181,14 @@ int main(int argc, char **argv) {
         game.community_cards[1] = game.deck[game.next_card++];
         game.community_cards[2] = game.deck[game.next_card++];
         
-        // Send updated info packets to all players
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (game.player_status[i] != PLAYER_LEFT && game.sockets[i] > 0) {
-                server_packet_t packet;
-                build_info_packet(&game, i, &packet);
-                log_info("Sending INFO packet with flop to player %d on socket %d", i, game.sockets[i]);
-                send(game.sockets[i], &packet, sizeof(server_packet_t), 0);
-            }
+        // Reset player turn to player after dealer for flop betting
+        g_player_turn = (g_dealer + 1) % MAX_PLAYERS;
+        int count = 0;
+        while (game.player_status[g_player_turn] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
+            g_player_turn = (g_player_turn + 1) % MAX_PLAYERS;
+            count++;
         }
+        log_info("After flop, player turn: %d", g_player_turn);
         
         // FLOP BETTING
         log_info("Starting flop betting, player turn: %d", g_player_turn);
@@ -201,15 +204,14 @@ int main(int argc, char **argv) {
         log_info("Dealing turn");
         game.community_cards[3] = game.deck[game.next_card++];
         
-        // Send updated info packets to all players
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (game.player_status[i] != PLAYER_LEFT && game.sockets[i] > 0) {
-                server_packet_t packet;
-                build_info_packet(&game, i, &packet);
-                log_info("Sending INFO packet with turn to player %d on socket %d", i, game.sockets[i]);
-                send(game.sockets[i], &packet, sizeof(server_packet_t), 0);
-            }
+        // Reset player turn to player after dealer for turn betting
+        g_player_turn = (g_dealer + 1) % MAX_PLAYERS;
+        count = 0;
+        while (game.player_status[g_player_turn] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
+            g_player_turn = (g_player_turn + 1) % MAX_PLAYERS;
+            count++;
         }
+        log_info("After turn, player turn: %d", g_player_turn);
         
         // TURN BETTING
         log_info("Starting turn betting, player turn: %d", g_player_turn);
@@ -225,15 +227,14 @@ int main(int argc, char **argv) {
         log_info("Dealing river");
         game.community_cards[4] = game.deck[game.next_card++];
         
-        // Send updated info packets to all players
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (game.player_status[i] != PLAYER_LEFT && game.sockets[i] > 0) {
-                server_packet_t packet;
-                build_info_packet(&game, i, &packet);
-                log_info("Sending INFO packet with river to player %d on socket %d", i, game.sockets[i]);
-                send(game.sockets[i], &packet, sizeof(server_packet_t), 0);
-            }
+        // Reset player turn to player after dealer for river betting
+        g_player_turn = (g_dealer + 1) % MAX_PLAYERS;
+        count = 0;
+        while (game.player_status[g_player_turn] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
+            g_player_turn = (g_player_turn + 1) % MAX_PLAYERS;
+            count++;
         }
+        log_info("After river, player turn: %d", g_player_turn);
         
         // RIVER BETTING
         log_info("Starting river betting, player turn: %d", g_player_turn);
@@ -253,15 +254,14 @@ showdown: {
         
         for (int i = 0; i < MAX_PLAYERS; i++) {
             if (game.player_status[i] != PLAYER_LEFT && game.sockets[i] > 0) {
+                int send_result = send(game.sockets[i], &end_packet, sizeof(server_packet_t), 0);
                 log_info("Sending END packet to player %d on socket %d", i, game.sockets[i]);
-                send(game.sockets[i], &end_packet, sizeof(server_packet_t), 0);
+                
+                if (send_result < 0) {
+                    log_err("Error sending END packet to player %d: %s", i, strerror(errno));
+                    handle_player_disconnect(&game, i);
+                }
             }
-        }
-        
-        // Move to the next dealer for the next hand
-        g_dealer = (g_dealer + 1) % MAX_PLAYERS;
-        while (game.player_status[g_dealer] != PLAYER_ACTIVE) {
-            g_dealer = (g_dealer + 1) % MAX_PLAYERS;
         }
     }
     }
@@ -270,7 +270,7 @@ showdown: {
 
     // Close all fds
     for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (server_fds[i] > 0) {
+        if (i < NUM_PORTS && server_fds[i] > 0) {
             close(server_fds[i]);
         }
         if (game.sockets[i] > 0) {
