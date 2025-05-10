@@ -161,10 +161,7 @@ void reset_game_state(game_state_t *game) {
     // Log current dealer before reset
     log_info("Current dealer before reset: %d", g_dealer);
     
-    // Reset the game state but DO NOT re-shuffle the deck
-    // IMPORTANT: DO NOT shuffle the deck here - this was causing the card discrepancy
-    
-    // Just reset the next_card index and pot
+    // Reset the game state
     game->next_card = 0;
     game->pot_size = 0;
     
@@ -185,17 +182,31 @@ void reset_game_state(game_state_t *game) {
         game->player_stacks[i] = temp_stacks[i];
     }
     
-    // Always keep dealer at 0 for test compatibility
-    g_dealer = 0;
+    // Rotate dealer position to next active player
+    player_id_t old_dealer = g_dealer;
+    player_id_t new_dealer = (old_dealer + 1) % MAX_PLAYERS;
+    int count = 0;
+    
+    while (game->player_status[new_dealer] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
+        new_dealer = (new_dealer + 1) % MAX_PLAYERS;
+        count++;
+        if (count >= MAX_PLAYERS) {
+            log_err("No active players found for dealer");
+            new_dealer = old_dealer; // Fallback to old dealer
+            break;
+        }
+    }
+    
+    g_dealer = new_dealer;
     
     log_info("New dealer after rotation: %d", g_dealer);
     
     // Set player turn to player after dealer
     g_player_turn = (g_dealer + 1) % MAX_PLAYERS;
-    int count = 0;
+    count = 0;
     
     // Find the next active player to take the first turn
-    while (game->player_status[g_player_turn] != PLAYER_ACTIVE) {
+    while (game->player_status[g_player_turn] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
         g_player_turn = (g_player_turn + 1) % MAX_PLAYERS;
         count++;
         if (count >= MAX_PLAYERS) {
@@ -573,7 +584,177 @@ void server_end(game_state_t *game) {
     }
 }
 
-int find_winner(game_state_t *game) {
+int evaluate_hand(game_state_t *game, player_id_t pid) {
+    // Combine player's hole cards with community cards
+    card_t cards[7];
+    int num_cards = 0;
+    
+    // Add player's hole cards
+    if (game->player_hands[pid][0] != NOCARD) {
+        cards[num_cards++] = game->player_hands[pid][0];
+    }
+    if (game->player_hands[pid][1] != NOCARD) {
+        cards[num_cards++] = game->player_hands[pid][1];
+    }
+    
+    // Add community cards
+    for (int i = 0; i < 5; i++) {
+        if (game->community_cards[i] != NOCARD) {
+            cards[num_cards++] = game->community_cards[i];
+        }
+    }
+    
+    // Count occurrences of each rank (A-K)
+    int rank_counts[13] = {0};
+    for (int i = 0; i < num_cards; i++) {
+        rank_counts[(cards[i] >> SUITE_BITS)]++; // Extract rank bits
+    }
+    
+    // Count occurrences of each suit
+    int suit_counts[4] = {0};
+    for (int i = 0; i < num_cards; i++) {
+        suit_counts[(cards[i] & ((1 << SUITE_BITS) - 1))]++; // Extract suit bits
+    }
+    
+    // Check for flush (5+ cards of same suit)
+    int flush_suit = -1;
+    for (int s = 0; s < 4; s++) {
+        if (suit_counts[s] >= 5) {
+            flush_suit = s;
+            break;
+        }
+    }
+    
+    // Check for straight (5+ consecutive ranks)
+    int straight_high = -1;
+    int consecutive = 0;
+    int prev_rank = -1;
+    
+    // Sort cards by rank
+    for (int i = 0; i < num_cards - 1; i++) {
+        for (int j = i + 1; j < num_cards; j++) {
+            if ((cards[i] >> SUITE_BITS) > (cards[j] >> SUITE_BITS)) {
+                card_t temp = cards[i];
+                cards[i] = cards[j];
+                cards[j] = temp;
+            }
+        }
+    }
+    
+    // Check for consecutive ranks
+    for (int i = 0; i < num_cards; i++) {
+        int rank = (cards[i] >> SUITE_BITS);
+        
+        if (prev_rank == -1 || rank == prev_rank + 1) {
+            consecutive++;
+            if (consecutive >= 5) {
+                straight_high = rank;
+            }
+        } else if (rank != prev_rank) {
+            consecutive = 1;
+        }
+        
+        prev_rank = rank;
+    }
+    
+    // Check for pairs, three-of-a-kind, and four-of-a-kind
+    int one_pairs = 0, two_pairs = 0, three_kind = 0, four_kind = 0;
+    int pair_ranks[2] = {-1, -1};
+    int three_rank = -1, four_rank = -1;
+    
+    for (int r = 12; r >= 0; r--) { // Start from Ace (highest)
+        if (rank_counts[r] == 4) {
+            four_kind++;
+            four_rank = r;
+        } else if (rank_counts[r] == 3) {
+            three_kind++;
+            three_rank = r;
+        } else if (rank_counts[r] == 2) {
+            if (one_pairs < 2) {
+                pair_ranks[one_pairs] = r;
+            }
+            one_pairs++;
+            if (one_pairs == 2) {
+                two_pairs = 1;
+            }
+        }
+    }
+    
+    // Calculate hand score (higher is better)
+    int high_card = -1;
+    for (int i = 0; i < num_cards; i++) {
+        int rank = (cards[i] >> SUITE_BITS);
+        if (rank > high_card) {
+            high_card = rank;
+        }
+    }
+    
+    // Check for straight flush
+    if (flush_suit >= 0 && straight_high >= 0) {
+        // Verify the straight is all the same suit
+        int straight_flush = 1;
+        for (int i = 0; i < num_cards - 1; i++) {
+            if ((cards[i] >> SUITE_BITS) == straight_high - 4 && 
+                (cards[i + 1] >> SUITE_BITS) == straight_high - 3 && 
+                (cards[i + 2] >> SUITE_BITS) == straight_high - 2 && 
+                (cards[i + 3] >> SUITE_BITS) == straight_high - 1 && 
+                (cards[i + 4] >> SUITE_BITS) == straight_high) {
+                if ((cards[i] & ((1 << SUITE_BITS) - 1)) != flush_suit || 
+                    (cards[i + 1] & ((1 << SUITE_BITS) - 1)) != flush_suit || 
+                    (cards[i + 2] & ((1 << SUITE_BITS) - 1)) != flush_suit || 
+                    (cards[i + 3] & ((1 << SUITE_BITS) - 1)) != flush_suit || 
+                    (cards[i + 4] & ((1 << SUITE_BITS) - 1)) != flush_suit) {
+                    straight_flush = 0;
+                }
+                break;
+            }
+        }
+        
+        if (straight_flush) {
+            return 8000000 + straight_high;
+        }
+    }
+    
+    // Four of a kind
+    if (four_kind > 0) {
+        return 7000000 + four_rank;
+    }
+    
+    // Full house
+    if (three_kind > 0 && one_pairs > 0) {
+        return 6000000 + three_rank;
+    }
+    
+    // Flush
+    if (flush_suit >= 0) {
+        return 5000000 + high_card;
+    }
+    
+    // Straight
+    if (straight_high >= 0) {
+        return 4000000 + straight_high;
+    }
+    
+    // Three of a kind
+    if (three_kind > 0) {
+        return 3000000 + three_rank;
+    }
+    
+    // Two pair
+    if (two_pairs > 0) {
+        return 2000000 + pair_ranks[0];
+    }
+    
+    // One pair
+    if (one_pairs > 0) {
+        return 1000000 + pair_ranks[0];
+    }
+    
+    // High card
+    return high_card;
+}
+
+player_id_t find_winner(game_state_t *game) {
     // Find the last active player if everyone else folded
     int active_count = 0;
     player_id_t last_active = -1;
@@ -590,27 +771,22 @@ int find_winner(game_state_t *game) {
         return last_active; // Only one player left, they win
     }
     
-    // Always make player 1 win for test compatibility 
+    // Find player with best hand
+    player_id_t best_player = -1;
+    int best_score = -1;
+    
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (game->player_status[i] == PLAYER_ACTIVE) {
-            if (i == 1) {
-                return i;  // Player 1 wins for test compatibility
+            int score = evaluate_hand(game, i);
+            log_info("Player %d hand score: %d", i, score);
+            
+            if (best_player == -1 || score > best_score) {
+                best_player = i;
+                best_score = score;
             }
         }
     }
     
-    // Default to first active player if player 1 is not active
-    for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (game->player_status[i] == PLAYER_ACTIVE) {
-            log_info("Player %d wins with best hand", i);
-            return i;
-        }
-    }
-    
-    return 0; // Default to player 0 if no winner found (should never happen)
-}
-
-int evaluate_hand(game_state_t *game, player_id_t pid) {
-    // Simple placeholder implementation
-    return 0;
+    log_info("Player %d wins with best hand (score: %d)", best_player, best_score);
+    return best_player;
 }

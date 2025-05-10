@@ -151,6 +151,9 @@ int main(int argc, char **argv) {
         
         reset_game_state(&game);
         
+        // Shuffle deck for new hand
+        shuffle_deck(game.deck);
+        
         // Restore socket descriptors after reset
         for (int i = 0; i < MAX_PLAYERS; i++) {
             game.sockets[i] = temp_sockets[i];
