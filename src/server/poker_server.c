@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>  /* For struct timeval */
 #include <errno.h>     /* Add this line for errno */
+#include <time.h>      /* For time() */
 
 #include "poker_client.h"
 #include "client_action_handler.h"
@@ -39,7 +40,7 @@ int main(int argc, char **argv) {
     int opt = 1;
     struct sockaddr_in server_address, client_address;
     socklen_t addrlen = sizeof(client_address);
-    int rand_seed = argc == 2 ? atoi(argv[1]) : 0; // Store random seed for reuse
+    int rand_seed = argc == 2 ? atoi(argv[1]) : (int)time(NULL); // Store random seed for reuse
 
     // Initialize logging - critical for tests
     log_init("server");
@@ -118,6 +119,9 @@ int main(int argc, char **argv) {
         log_info("Restored socket %d for player %d", game.sockets[i], i);
     }
 
+    // Initialize the deck once at program start
+    init_deck(game.deck, rand_seed);
+    
     //Join state
     server_join(&game);
 
@@ -156,12 +160,11 @@ int main(int argc, char **argv) {
         // Reset game state
         reset_game_state(&game);
         
-        // For testing - initialize the deck with a consistent seed
+        // For testing - log the game count
         game_count++;
         log_info("Game %d: Using random seed: %d", game_count, rand_seed);
 
-        // Initialize and shuffle the deck
-        init_deck(game.deck, rand_seed);
+        // Only shuffle the deck (no reinitializing with the same seed)
         shuffle_deck(game.deck);
         game.next_card = 0;
         
