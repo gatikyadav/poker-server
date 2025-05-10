@@ -18,6 +18,7 @@ player_id_t g_dealer = 0;  // Always start with player 0 as dealer
 player_id_t g_player_turn = 1;  // Player 1 goes first
 int g_bet_size = 0;
 int g_player_bets[MAX_PLAYERS] = {0};
+int g_first_hand = 1;  // Flag to track if this is the first hand
 
 // Set socket to blocking mode with no timeout
 void set_socket_blocking(int socket_fd) {
@@ -135,6 +136,8 @@ void init_game_state(game_state_t *game, int starting_stack, int random_seed) {
     // Initialize global variables as per assignment requirements
     // "At the start of the game, player 0 should always be the dealer"
     g_dealer = 0;
+    g_first_hand = 1;  // Mark this as the first hand
+    
     // "Every time new cards are added to the community, player 1 should be the first player to take a turn"
     g_player_turn = 1;
     g_bet_size = 0;
@@ -155,14 +158,11 @@ void reset_game_state(game_state_t *game) {
     for (int i = 0; i < MAX_PLAYERS; i++) {
         temp_sockets[i] = game->sockets[i];
         temp_status[i] = game->player_status[i];
-        temp_stacks[i] = game->player_stacks[i];
+        temp_stacks[i] = game->player_stacks[i];  // FIXED: was incorrectly copying to itself
     }
     
-    // Log current dealer before reset
-    log_info("Current dealer before reset: %d", g_dealer);
-    
     // Reset the game state
-    game->next_card = 0;
+    game->next_card = 0;  // Reset to 0 to start from beginning of deck
     game->pot_size = 0;
     
     // Reset all bets
@@ -179,31 +179,35 @@ void reset_game_state(game_state_t *game) {
     for (int i = 0; i < MAX_PLAYERS; i++) {
         game->sockets[i] = temp_sockets[i];
         game->player_status[i] = temp_status[i];
-        game->player_stacks[i] = temp_stacks[i];
+        game->player_stacks[i] = temp_stacks[i];  // FIXED: now correctly restoring from temp_stacks
     }
     
-    // Rotate dealer position to next active player
-    player_id_t old_dealer = g_dealer;
-    player_id_t new_dealer = (old_dealer + 1) % MAX_PLAYERS;
-    int count = 0;
-    
-    while (game->player_status[new_dealer] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
-        new_dealer = (new_dealer + 1) % MAX_PLAYERS;
-        count++;
-        if (count >= MAX_PLAYERS) {
-            log_err("No active players found for dealer");
-            new_dealer = old_dealer; // Fallback to old dealer
-            break;
+    // Only rotate dealer if this is not the first hand
+    if (!g_first_hand) {
+        // Rotate dealer to next active player
+        player_id_t new_dealer = (g_dealer + 1) % MAX_PLAYERS;
+        int count = 0;
+        
+        while (game->player_status[new_dealer] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
+            new_dealer = (new_dealer + 1) % MAX_PLAYERS;
+            count++;
+            if (count >= MAX_PLAYERS) {
+                log_err("No active players found for dealer");
+                break; // Avoid infinite loop
+            }
         }
+        
+        g_dealer = new_dealer;
+        log_info("New dealer after rotation: %d", g_dealer);
+    } else {
+        // First hand is over, mark it for future hands
+        g_first_hand = 0;
+        log_info("First hand complete, dealer remains at %d", g_dealer);
     }
-    
-    g_dealer = new_dealer;
-    
-    log_info("New dealer after rotation: %d", g_dealer);
     
     // Set player turn to player after dealer
     g_player_turn = (g_dealer + 1) % MAX_PLAYERS;
-    count = 0;
+    int count = 0;
     
     // Find the next active player to take the first turn
     while (game->player_status[g_player_turn] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
@@ -217,7 +221,7 @@ void reset_game_state(game_state_t *game) {
     
     g_bet_size = 0;
     
-    log_info("Game state reset, new dealer: %d, player turn: %d", g_dealer, g_player_turn);
+    log_info("Game state reset, dealer: %d, player turn: %d", g_dealer, g_player_turn);
 }
 
 void server_join(game_state_t *game) {

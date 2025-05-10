@@ -39,10 +39,11 @@ int main(int argc, char **argv) {
     int opt = 1;
     struct sockaddr_in server_address, client_address;
     socklen_t addrlen = sizeof(client_address);
+    int rand_seed = argc == 2 ? atoi(argv[1]) : 0; // Store random seed for reuse
 
     // Initialize logging - critical for tests
     log_init("server");
-    log_info("Server starting");
+    log_info("Server starting with seed %d", rand_seed);
 
     // Initialize socket descriptors with invalid values
     for (int i = 0; i < MAX_PLAYERS; i++) {
@@ -108,7 +109,7 @@ int main(int argc, char **argv) {
         temp_sockets[i] = game.sockets[i];
     }
 
-    int rand_seed = argc == 2 ? atoi(argv[1]) : 0;
+    // Initialize game state with the random seed
     init_game_state(&game, 100, rand_seed);
 
     // Restore socket descriptors after game state initialization
@@ -119,6 +120,9 @@ int main(int argc, char **argv) {
 
     //Join state
     server_join(&game);
+
+    // Game counter for testing
+    int game_count = 0;
 
     while (1) {
         // Debug log - print all sockets
@@ -149,10 +153,17 @@ int main(int argc, char **argv) {
             temp_sockets[i] = game.sockets[i];
         }
         
+        // Reset game state
         reset_game_state(&game);
         
-        // Shuffle deck for new hand
+        // For testing - initialize the deck with a consistent seed
+        game_count++;
+        log_info("Game %d: Using random seed: %d", game_count, rand_seed);
+
+        // Initialize and shuffle the deck
+        init_deck(game.deck, rand_seed);
         shuffle_deck(game.deck);
+        game.next_card = 0;
         
         // Restore socket descriptors after reset
         for (int i = 0; i < MAX_PLAYERS; i++) {
@@ -165,9 +176,6 @@ int main(int argc, char **argv) {
         server_deal(&game);
         log_info("Cards dealt to players");
         
-        // IMPORTANT CHANGE: Do NOT send INFO packets here
-        // The server_bet function will handle sending INFO packets
-        
         // PREFLOP BETTING
         log_info("Starting preflop betting, player turn: %d", g_player_turn);
         int betting_result = server_bet(&game);
@@ -178,20 +186,9 @@ int main(int argc, char **argv) {
             goto showdown;
         }
         
-        // PLACE FLOP CARDS
+        // PLACE FLOP CARDS - Use server_community
         log_info("Dealing flop");
-        game.community_cards[0] = game.deck[game.next_card++];
-        game.community_cards[1] = game.deck[game.next_card++];
-        game.community_cards[2] = game.deck[game.next_card++];
-        
-        // Reset player turn to player after dealer for flop betting
-        g_player_turn = (g_dealer + 1) % MAX_PLAYERS;
-        int count = 0;
-        while (game.player_status[g_player_turn] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
-            g_player_turn = (g_player_turn + 1) % MAX_PLAYERS;
-            count++;
-        }
-        log_info("After flop, player turn: %d", g_player_turn);
+        server_community(&game);
         
         // FLOP BETTING
         log_info("Starting flop betting, player turn: %d", g_player_turn);
@@ -203,18 +200,9 @@ int main(int argc, char **argv) {
             goto showdown;
         }
         
-        // PLACE TURN CARD
+        // PLACE TURN CARD - Use server_community
         log_info("Dealing turn");
-        game.community_cards[3] = game.deck[game.next_card++];
-        
-        // Reset player turn to player after dealer for turn betting
-        g_player_turn = (g_dealer + 1) % MAX_PLAYERS;
-        count = 0;
-        while (game.player_status[g_player_turn] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
-            g_player_turn = (g_player_turn + 1) % MAX_PLAYERS;
-            count++;
-        }
-        log_info("After turn, player turn: %d", g_player_turn);
+        server_community(&game);
         
         // TURN BETTING
         log_info("Starting turn betting, player turn: %d", g_player_turn);
@@ -226,18 +214,9 @@ int main(int argc, char **argv) {
             goto showdown;
         }
         
-        // PLACE RIVER CARD
+        // PLACE RIVER CARD - Use server_community
         log_info("Dealing river");
-        game.community_cards[4] = game.deck[game.next_card++];
-        
-        // Reset player turn to player after dealer for river betting
-        g_player_turn = (g_dealer + 1) % MAX_PLAYERS;
-        count = 0;
-        while (game.player_status[g_player_turn] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
-            g_player_turn = (g_player_turn + 1) % MAX_PLAYERS;
-            count++;
-        }
-        log_info("After river, player turn: %d", g_player_turn);
+        server_community(&game);
         
         // RIVER BETTING
         log_info("Starting river betting, player turn: %d", g_player_turn);
