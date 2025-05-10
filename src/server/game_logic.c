@@ -14,8 +14,8 @@
 #include "logs.h"
 
 // Global variables to track game state
-player_id_t g_dealer = 0;  // Always start with player 0 as dealer
-player_id_t g_player_turn = 1;  // Player 1 goes first
+player_id_t g_dealer = 0;  // Initial dealer, will be updated based on active players
+player_id_t g_player_turn = 1;  // Initial player turn, will be updated based on active players
 int g_bet_size = 0;
 int g_player_bets[MAX_PLAYERS] = {0};
 int g_first_hand = 1;  // Flag to track if this is the first hand
@@ -117,9 +117,8 @@ void init_game_state(game_state_t *game, int starting_stack, int random_seed) {
         set_socket_blocking(game->sockets[i]);
     }
     
-    // Initialize the deck as specified in the assignment
-    init_deck(game->deck, random_seed);
-    shuffle_deck(game->deck);
+    // Initialize the deck - Note: actual initialization happens in main once at start,
+    // separate from game state init
     
     for (int i = 0; i < MAX_PLAYERS; i++) {
         game->player_stacks[i] = starting_stack;
@@ -134,19 +133,19 @@ void init_game_state(game_state_t *game, int starting_stack, int random_seed) {
     }
     
     // Initialize global variables as per assignment requirements
-    // "At the start of the game, player 0 should always be the dealer"
-    g_dealer = 0;
+    // Find the lowest-numbered player for the dealer
+    g_dealer = 0;  // Default to 0, will be updated after JOIN/READY
     g_first_hand = 1;  // Mark this as the first hand
     
-    // "Every time new cards are added to the community, player 1 should be the first player to take a turn"
-    g_player_turn = 1;
+    // Every time new cards are added to the community, player 1 should be the first player to take a turn
+    g_player_turn = 1;  // Default, will be updated after seeing active players
     g_bet_size = 0;
     memset(g_player_bets, 0, sizeof(g_player_bets));
     
     game->pot_size = 0;
     game->next_card = 0;
     
-    log_info("Game state initialized, dealer: %d, starting stack: %d", g_dealer, starting_stack);
+    log_info("Game state initialized, starting dealer: %d, starting stack: %d", g_dealer, starting_stack);
 }
 
 void reset_game_state(game_state_t *game) {
@@ -158,7 +157,7 @@ void reset_game_state(game_state_t *game) {
     for (int i = 0; i < MAX_PLAYERS; i++) {
         temp_sockets[i] = game->sockets[i];
         temp_status[i] = game->player_status[i];
-        temp_stacks[i] = game->player_stacks[i];  // FIXED: was incorrectly copying to itself
+        temp_stacks[i] = game->player_stacks[i];
     }
     
     // Reset the game state
@@ -179,45 +178,73 @@ void reset_game_state(game_state_t *game) {
     for (int i = 0; i < MAX_PLAYERS; i++) {
         game->sockets[i] = temp_sockets[i];
         game->player_status[i] = temp_status[i];
-        game->player_stacks[i] = temp_stacks[i];  // FIXED: now correctly restoring from temp_stacks
+        game->player_stacks[i] = temp_stacks[i];
     }
     
     // Only rotate dealer if this is not the first hand
     if (!g_first_hand) {
-        // Rotate dealer to next active player
-        player_id_t new_dealer = (g_dealer + 1) % MAX_PLAYERS;
-        int count = 0;
-        
-        while (game->player_status[new_dealer] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
-            new_dealer = (new_dealer + 1) % MAX_PLAYERS;
-            count++;
-            if (count >= MAX_PLAYERS) {
-                log_err("No active players found for dealer");
-                break; // Avoid infinite loop
+        // Count active players first
+        int active_players = 0;
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            if (game->player_status[i] == PLAYER_ACTIVE) {
+                active_players++;
             }
         }
+        
+        // Start from the current dealer and find the next active player
+        player_id_t new_dealer = g_dealer;
+        int count = 0;
+        
+        do {
+            // Move to the next player
+            new_dealer = (new_dealer + 1) % MAX_PLAYERS;
+            count++;
+            
+            // If we've gone through all players and found no active one, break to avoid infinite loop
+            if (count >= MAX_PLAYERS) {
+                log_err("No active players found for dealer rotation");
+                break;
+            }
+        } while (game->player_status[new_dealer] != PLAYER_ACTIVE);
         
         g_dealer = new_dealer;
         log_info("New dealer after rotation: %d", g_dealer);
     } else {
         // First hand is over, mark it for future hands
         g_first_hand = 0;
-        log_info("First hand complete, dealer remains at %d", g_dealer);
+        
+        // For the first hand, ensure the dealer is the lowest-numbered active player
+        player_id_t new_dealer = 0;
+        while (new_dealer < MAX_PLAYERS) {
+            if (game->player_status[new_dealer] == PLAYER_ACTIVE) {
+                break;
+            }
+            new_dealer++;
+        }
+        
+        if (new_dealer < MAX_PLAYERS) {
+            g_dealer = new_dealer;
+            log_info("First hand complete, dealer set to lowest active player: %d", g_dealer);
+        } else {
+            log_err("No active players found for initial dealer");
+        }
     }
     
     // Set player turn to player after dealer
-    g_player_turn = (g_dealer + 1) % MAX_PLAYERS;
+    g_player_turn = g_dealer;
     int count = 0;
     
     // Find the next active player to take the first turn
-    while (game->player_status[g_player_turn] != PLAYER_ACTIVE && count < MAX_PLAYERS) {
+    do {
         g_player_turn = (g_player_turn + 1) % MAX_PLAYERS;
         count++;
+        
+        // If we've gone through all players and found no active one, break to avoid infinite loop
         if (count >= MAX_PLAYERS) {
             log_err("No active players found for turn");
-            break; // Avoid infinite loop
+            break;
         }
-    }
+    } while (game->player_status[g_player_turn] != PLAYER_ACTIVE);
     
     g_bet_size = 0;
     
@@ -234,7 +261,7 @@ void server_join(game_state_t *game) {
         // Make sure socket is valid
         if (game->sockets[i] <= 0) {
             log_err("Invalid socket descriptor %d for player %d", game->sockets[i], i);
-            game->player_status[i] = PLAYER_FOLDED;
+            game->player_status[i] = PLAYER_LEFT;
             continue;
         }
         
@@ -308,6 +335,34 @@ int server_ready(game_state_t *game) {
                 log_info("[Server] Assuming player %d is ready", i);
             }
         }
+    }
+    
+    // If this is the first hand, set the dealer to the lowest active player ID
+    if (g_first_hand) {
+        // Find the lowest-numbered active player
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            if (game->player_status[i] == PLAYER_ACTIVE) {
+                g_dealer = i;
+                log_info("Setting initial dealer to lowest active player: %d", g_dealer);
+                break;
+            }
+        }
+        
+        // Set player turn to the next active player after the dealer
+        g_player_turn = g_dealer;
+        int count = 0;
+        
+        do {
+            g_player_turn = (g_player_turn + 1) % MAX_PLAYERS;
+            count++;
+            
+            if (count >= MAX_PLAYERS) {
+                log_err("No next active player found for initial turn");
+                break;
+            }
+        } while (game->player_status[g_player_turn] != PLAYER_ACTIVE);
+        
+        log_info("Initial settings - dealer: %d, player_turn: %d", g_dealer, g_player_turn);
     }
     
     log_info("Total active players: %d", active_players);
