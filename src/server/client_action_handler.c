@@ -134,8 +134,14 @@ void build_info_packet(game_state_t *game, player_id_t pid, server_packet_t *out
         out->info.player_stacks[i] = game->player_stacks[i];
     }
     
-    // Set pot size
-    out->info.pot_size = game->pot_size;
+    // Calculate current pot size including all bets
+    int current_pot = game->pot_size;
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        current_pot += g_player_bets[i];
+    }
+    
+    // Set pot size in the packet
+    out->info.pot_size = current_pot;
     
     // Set dealer and player turn
     out->info.dealer = g_dealer;
@@ -177,13 +183,29 @@ void build_end_packet(game_state_t *game, player_id_t winner, server_packet_t *o
         out->end.community_cards[i] = game->community_cards[i];
     }
     
-    // Copy player stacks
+    // Calculate total from current bets
+    int current_bets_total = 0;
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        current_bets_total += g_player_bets[i];
+    }
+    
+    // Calculate if we need to add current bets to the winner's stack
+    // If current_bets_total > 0, it means the bets haven't been collected into the pot yet
+    int need_to_add_bets = (current_bets_total > 0);
+    
+    // Copy stacks from game state
     for (int i = 0; i < MAX_PLAYERS; i++) {
         out->end.player_stacks[i] = game->player_stacks[i];
     }
     
-    // Set pot size
-    out->end.pot_size = game->pot_size;
+    // For the winner, add current bets if they haven't been added to the pot yet
+    if (need_to_add_bets) {
+        out->end.player_stacks[winner] += current_bets_total;
+    }
+    
+    // Calculate final pot size for display (includes current bets)
+    int total_pot = game->pot_size + current_bets_total;
+    out->end.pot_size = total_pot;
     
     // Set dealer and winner
     out->end.dealer = g_dealer;
