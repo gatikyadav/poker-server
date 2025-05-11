@@ -401,6 +401,7 @@ int server_bet(game_state_t *game) {
     player_id_t current_player = g_player_turn;
     player_id_t start_player = g_player_turn; // Remember where we started
     int all_players_acted = 0;
+    player_id_t last_info_sent_player = -1; // Track the last player for whom INFO was sent
     
     log_info("Starting betting round with dealer: %d, first player: %d", g_dealer, current_player);
     
@@ -432,24 +433,30 @@ int server_bet(game_state_t *game) {
         // Set current player
         g_player_turn = current_player;
         
-        // Send INFO packet to all players just once per player turn
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (game->player_status[i] != PLAYER_LEFT && game->sockets[i] > 0) {
-                build_info_packet(game, i, &server_packet);
-                int send_result = send(game->sockets[i], &server_packet, sizeof(server_packet_t), 0);
-                log_info("Sent INFO packet to player %d on socket %d (result: %d)", i, game->sockets[i], send_result);
-                
-                if (send_result < 0) {
-                    log_err("Error sending INFO packet to player %d: %s", i, strerror(errno));
-                    game->player_status[i] = PLAYER_LEFT;
-                    close(game->sockets[i]);
-                    game->sockets[i] = -1;
+        // Only send INFO packets if we're moving to a new player or starting the betting round
+        if (current_player != last_info_sent_player) {
+            last_info_sent_player = current_player;
+            
+            // Send INFO packet to all players
+            for (int i = 0; i < MAX_PLAYERS; i++) {
+                if (game->player_status[i] != PLAYER_LEFT && game->sockets[i] > 0) {
+                    build_info_packet(game, i, &server_packet);
+                    int send_result = send(game->sockets[i], &server_packet, sizeof(server_packet_t), 0);
+                    log_info("Sent INFO packet to player %d on socket %d (result: %d)", i, game->sockets[i], send_result);
                     
-                    // If this was the current player's turn, find the next active player
-                    if (i == current_player) {
-                        current_player = (current_player + 1) % MAX_PLAYERS;
-                        // Reset round tracking if we had to skip the current player
-                        continue;
+                    if (send_result < 0) {
+                        log_err("Error sending INFO packet to player %d: %s", i, strerror(errno));
+                        game->player_status[i] = PLAYER_LEFT;
+                        close(game->sockets[i]);
+                        game->sockets[i] = -1;
+                        
+                        // If this was the current player's turn, find the next active player
+                        if (i == current_player) {
+                            current_player = (current_player + 1) % MAX_PLAYERS;
+                            last_info_sent_player = -1; // Reset this so INFO will be sent for next player
+                            // Reset round tracking if we had to skip the current player
+                            continue;
+                        }
                     }
                 }
             }
@@ -488,6 +495,7 @@ int server_bet(game_state_t *game) {
             // Find the next active player
             player_id_t prev_player = current_player;
             current_player = (current_player + 1) % MAX_PLAYERS;
+            last_info_sent_player = -1; // Reset this so INFO will be sent for next player
             int count = 0;
             
             while ((game->player_status[current_player] != PLAYER_ACTIVE || game->sockets[current_player] <= 0) && count < MAX_PLAYERS) {
@@ -535,6 +543,7 @@ int server_bet(game_state_t *game) {
             // Find the next active player
             player_id_t prev_player = current_player;
             current_player = (current_player + 1) % MAX_PLAYERS;
+            last_info_sent_player = -1; // Reset this so INFO will be sent for next player
             int count = 0;
             
             while ((game->player_status[current_player] != PLAYER_ACTIVE || game->sockets[current_player] <= 0) && count < MAX_PLAYERS) {
@@ -553,6 +562,7 @@ int server_bet(game_state_t *game) {
             // Valid action, move to next player
             player_id_t prev_player = current_player;
             current_player = (current_player + 1) % MAX_PLAYERS;
+            last_info_sent_player = -1; // Reset this so INFO will be sent for next player
             
             // Skip inactive players
             int count = 0;
@@ -591,6 +601,10 @@ int server_bet(game_state_t *game) {
                 log_info("Betting round complete, all players have matched bets");
                 betting_complete = 1;
             }
+        } else {
+            // Invalid action, same player's turn
+            // No need to reset last_info_sent_player since we're staying with the same player
+            continue;
         }
     }
     
