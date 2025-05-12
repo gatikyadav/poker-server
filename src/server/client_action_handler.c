@@ -13,11 +13,10 @@ extern player_id_t g_player_turn;
 extern int g_bet_size;
 extern int g_player_bets[MAX_PLAYERS];
 
-// In client_action_handler.c
 int handle_client_action(game_state_t *game, player_id_t pid, const client_packet_t *in, server_packet_t *out) {
     // Log the current game state for debugging
-    log_info("handle_client_action: Current dealer=%d, player_turn=%d, bet_size=%d, player_bet=%d", 
-             g_dealer, g_player_turn, g_bet_size, g_player_bets[pid]);
+    log_info("handle_client_action: Current dealer=%d, player_turn=%d, bet_size=%d", 
+             g_dealer, g_player_turn, g_bet_size);
     
     // Check if it's the player's turn
     if (pid != g_player_turn) {
@@ -36,11 +35,10 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
     // Handle different action types
     switch (in->packet_type) {
         case CHECK: {
-            // Check is only valid if the current bet is 0 or the player has already matched it
+            // Check is only valid if the current bet is 0
             if (g_bet_size > g_player_bets[pid]) {
                 out->packet_type = NACK;
-                log_info("NACK: Player %d cannot check, bet size is %d, player bet is %d - must call or fold", 
-                         pid, g_bet_size, g_player_bets[pid]);
+                log_info("NACK: Player %d cannot check, bet size is %d", pid, g_bet_size);
                 return -1;
             }
             log_info("Player %d checks", pid);
@@ -51,7 +49,7 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
             // Call is valid only if there's a bet to match
             if (g_bet_size == 0 || g_bet_size <= g_player_bets[pid]) {
                 out->packet_type = NACK;
-                log_info("NACK: Player %d cannot call, no bet to match or already matched", pid);
+                log_info("NACK: Player %d cannot call, no bet to match", pid);
                 return -1;
             }
             
@@ -66,7 +64,7 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
             
             game->player_stacks[pid] -= to_call;
             g_player_bets[pid] += to_call;
-            log_info("Player %d calls %d (total bet now %d)", pid, to_call, g_player_bets[pid]);
+            log_info("Player %d calls %d", pid, to_call);
             break;
         }
             
@@ -82,20 +80,18 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
                 return -1;
             }
             
-            // Check if player has enough money for the total bet amount
-            int total_to_bet = raise_amount;
-            int additional_needed = total_to_bet - g_player_bets[pid];
-            
-            if (additional_needed > game->player_stacks[pid]) {
+            // Check if player has enough money
+            int to_raise = raise_amount - g_player_bets[pid];
+            if (to_raise > game->player_stacks[pid]) {
                 out->packet_type = NACK;
                 log_info("NACK: Player %d doesn't have enough chips for raise", pid);
                 return -1;
             }
             
             // Update player stack and bet
-            game->player_stacks[pid] -= additional_needed;
-            g_player_bets[pid] = total_to_bet;  // Set total bet to raise amount
-            g_bet_size = raise_amount;  // Update global bet size
+            game->player_stacks[pid] -= to_raise;
+            g_player_bets[pid] += to_raise;
+            g_bet_size = raise_amount;
             log_info("Player %d raises to %d", pid, raise_amount);
             break;
         }
