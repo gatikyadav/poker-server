@@ -35,11 +35,10 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
     // Handle different action types
     switch (in->packet_type) {
         case CHECK: {
-            // Check is only valid if the current bet is 0 or player has already matched it
+            // Check is only valid if the current bet is 0
             if (g_bet_size > g_player_bets[pid]) {
                 out->packet_type = NACK;
-                log_info("NACK: Player %d cannot check, bet size is %d, player bet is %d", 
-                       pid, g_bet_size, g_player_bets[pid]);
+                log_info("NACK: Player %d cannot check, bet size is %d", pid, g_bet_size);
                 return -1;
             }
             log_info("Player %d checks", pid);
@@ -50,7 +49,7 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
             // Call is valid only if there's a bet to match
             if (g_bet_size == 0 || g_bet_size <= g_player_bets[pid]) {
                 out->packet_type = NACK;
-                log_info("NACK: Player %d cannot call, no bet to match or already matched", pid);
+                log_info("NACK: Player %d cannot call, no bet to match", pid);
                 return -1;
             }
             
@@ -61,13 +60,11 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
             if (to_call > game->player_stacks[pid]) {
                 // Player goes all-in
                 to_call = game->player_stacks[pid];
-                log_info("Player %d going all-in with %d", pid, to_call);
             }
             
             game->player_stacks[pid] -= to_call;
             g_player_bets[pid] += to_call;
-            log_info("Player %d calls %d, total bet now %d, stack now %d", 
-                   pid, to_call, g_player_bets[pid], game->player_stacks[pid]);
+            log_info("Player %d calls %d", pid, to_call);
             break;
         }
             
@@ -83,15 +80,11 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
                 return -1;
             }
             
-            // Calculate how much more the player needs to put in
-            int current_bet = g_player_bets[pid];
-            int to_raise = raise_amount - current_bet;
-            
-            // Check if player has enough money for the raise
+            // Check if player has enough money
+            int to_raise = raise_amount - g_player_bets[pid];
             if (to_raise > game->player_stacks[pid]) {
                 out->packet_type = NACK;
-                log_info("NACK: Player %d doesn't have enough chips for raise. Needed: %d, Has: %d", 
-                       pid, to_raise, game->player_stacks[pid]);
+                log_info("NACK: Player %d doesn't have enough chips for raise", pid);
                 return -1;
             }
             
@@ -99,8 +92,7 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
             game->player_stacks[pid] -= to_raise;
             g_player_bets[pid] += to_raise;
             g_bet_size = raise_amount;
-            log_info("Player %d raises to %d, total bet now %d, stack now %d", 
-                   pid, raise_amount, g_player_bets[pid], game->player_stacks[pid]);
+            log_info("Player %d raises to %d", pid, raise_amount);
             break;
         }
             
@@ -111,19 +103,10 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
             break;
         }
             
-        case READY:
-        case LEAVE: {
-            // These actions should not be handled here during betting rounds
-            out->packet_type = NACK;
-            log_info("NACK: Invalid action type %d from player %d during betting round", 
-                   in->packet_type, pid);
-            return -1;
-        }
-            
         default: {
             // Invalid action type
             out->packet_type = NACK;
-            log_info("NACK: Unknown action type %d from player %d", in->packet_type, pid);
+            log_info("NACK: Invalid action type from player %d", pid);
             return -1;
         }
     }

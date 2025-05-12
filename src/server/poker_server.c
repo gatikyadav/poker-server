@@ -131,7 +131,7 @@ int main(int argc, char **argv) {
     while (1) {
         // Debug log - print all sockets
         for (int i = 0; i < MAX_PLAYERS; i++) {
-            log_info("Player %d socket: %d, status: %d", i, game.sockets[i], game.player_status[i]);
+            log_info("Player %d socket: %d", i, game.sockets[i]);
         }
         
         // READY state
@@ -187,29 +187,13 @@ int main(int argc, char **argv) {
         server_deal(&game);
         log_info("Cards dealt to players");
         
-        // Send initial INFO packets to all players after dealing
-        server_packet_t info_packet;
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (game.player_status[i] != PLAYER_LEFT && game.sockets[i] > 0) {
-                build_info_packet(&game, i, &info_packet);  // Fixed: Added & before game
-                int send_result = send(game.sockets[i], &info_packet, sizeof(server_packet_t), 0);
-                log_info("Sending initial INFO packet to player %d", i);
-                
-                if (send_result < 0) {
-                    log_err("Error sending initial INFO packet to player %d: %s", 
-                            i, strerror(errno));
-                    handle_player_disconnect(&game, i);
-                }
-            }
-        }
-        
         // PREFLOP BETTING
         log_info("Starting preflop betting, player turn: %d", g_player_turn);
         int betting_result = server_bet(&game);
         
         // If only one player remains, go to showdown
         if (betting_result == 1) {
-            log_info("Only one player remains active after preflop, going to showdown");
+            log_info("Only one player remains active, going to showdown");
             goto showdown;
         }
         
@@ -223,7 +207,7 @@ int main(int argc, char **argv) {
         
         // If only one player remains, go to showdown
         if (betting_result == 1) {
-            log_info("Only one player remains active after flop betting, going to showdown");
+            log_info("Only one player remains active, going to showdown");
             goto showdown;
         }
         
@@ -237,7 +221,7 @@ int main(int argc, char **argv) {
         
         // If only one player remains, go to showdown
         if (betting_result == 1) {
-            log_info("Only one player remains active after turn betting, going to showdown");
+            log_info("Only one player remains active, going to showdown");
             goto showdown;
         }
         
@@ -256,11 +240,10 @@ showdown: {
         
         // Update winner's stack with pot
         game.player_stacks[winner] += game.pot_size;
-        log_info("Updated winner's (player %d) stack to %d", winner, game.player_stacks[winner]);
         
         // Send END packet to all players
         server_packet_t end_packet;
-        build_end_packet(&game, winner, &end_packet);  // Fixed: Already correct
+        build_end_packet(&game, winner, &end_packet);
         
         for (int i = 0; i < MAX_PLAYERS; i++) {
             if (game.player_status[i] != PLAYER_LEFT && game.sockets[i] > 0) {
