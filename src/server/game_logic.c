@@ -1,12 +1,16 @@
+/*CSE 220 HW5
+  Gatik Yadav
+  115806362
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
-#include <sys/time.h>  /* For struct timeval */
+#include <sys/time.h>  
 #include <errno.h>
-#include <fcntl.h>     /* For fcntl */
+#include <fcntl.h>     
 
 #include "poker_client.h"
 #include "client_action_handler.h"
@@ -14,11 +18,11 @@
 #include "logs.h"
 
 // Global variables to track game state
-player_id_t g_dealer = 0;  // Initial dealer, will be updated based on active players
-player_id_t g_player_turn = 1;  // Initial player turn, will be updated based on active players
+player_id_t g_dealer = 0;  // Initial dealer
+player_id_t g_player_turn = 1;  // Initial player turn
 int g_bet_size = 0;
 int g_player_bets[MAX_PLAYERS] = {0};
-int g_first_hand = 1;  // Flag to track if this is the first hand
+int g_first_hand = 1;  // Flag to track the first hand
 
 // Set socket to blocking mode with no timeout
 void set_socket_blocking(int socket_fd) {
@@ -117,8 +121,7 @@ void init_game_state(game_state_t *game, int starting_stack, int random_seed) {
         set_socket_blocking(game->sockets[i]);
     }
     
-    // Initialize the deck - Note: actual initialization happens in main once at start,
-    // separate from game state init
+    // Initialize the deck (actual initialization happens in main once at start)
     
     for (int i = 0; i < MAX_PLAYERS; i++) {
         game->player_stacks[i] = starting_stack;
@@ -135,7 +138,7 @@ void init_game_state(game_state_t *game, int starting_stack, int random_seed) {
     // Initialize global variables as per assignment requirements
     // Find the lowest-numbered player for the dealer
     g_dealer = 0;  // Default to 0, will be updated after JOIN/READY
-    g_first_hand = 1;  // Mark this as the first hand
+    g_first_hand = 1;  // Mark as the first hand
     
     // Every time new cards are added to the community, player 1 should be the first player to take a turn
     g_player_turn = 1;  // Default, will be updated after seeing active players
@@ -328,14 +331,13 @@ int server_ready(game_state_t *game) {
             log_info("[Server] Player %d left", i);
         } else if (packet.packet_type == CHECK || packet.packet_type == CALL || 
                   packet.packet_type == RAISE || packet.packet_type == FOLD) {
-            // These are game action packets that might arrive if client is out of sync
-            // We'll treat these as READY for robustness
+            // These are game action packets that might arrive if client is out of sync, treat these as READY for robustness
             game->player_status[i] = PLAYER_ACTIVE;
             active_players++;
             log_info("[Server] Received game action packet from player %d, treating as READY", i);
         } else {
             log_err("Unexpected packet type from player %d: %d", i, packet.packet_type);
-            // Try to handle it gracefully - assume READY if not LEAVE
+            // Try to handle it, assume READY if not LEAVE
             if (packet.packet_type != LEAVE) {
                 game->player_status[i] = PLAYER_ACTIVE;
                 active_players++;
@@ -377,10 +379,7 @@ int server_ready(game_state_t *game) {
 }
 
 void server_deal(game_state_t *game) {
-    // Deal cards in player order as specified in the assignment:
-    // "To standardize the behavior of our servers when you are dealing cards deal 2 cards to the
-    // lowest numbered player who is "ready" first. Then move around the table to the next lowest
-    // numbered player and give them 2 cards."
+    // Deal cards in player order as specified in the assignment
     
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (game->player_status[i] == PLAYER_ACTIVE) {
@@ -399,9 +398,9 @@ int server_bet(game_state_t *game) {
     int active_players = 0;
     int betting_complete = 0;
     player_id_t current_player = g_player_turn;
-    player_id_t start_player = g_player_turn; // Remember where we started
+    player_id_t start_player = g_player_turn; // Track where we started
     int all_players_acted = 0;
-    player_id_t last_info_sent_player = -1; // Track the last player for whom INFO was sent
+    player_id_t last_info_sent_player = -1; // Track the last player for INFO
     
     log_info("Starting betting round with dealer: %d, first player: %d", g_dealer, current_player);
     
@@ -492,7 +491,7 @@ int server_bet(game_state_t *game) {
                 return 1;
             }
             
-            // Find the next active player
+            // Find next active player
             player_id_t prev_player = current_player;
             current_player = (current_player + 1) % MAX_PLAYERS;
             last_info_sent_player = -1; // Reset this so INFO will be sent for next player
@@ -576,7 +575,7 @@ int server_bet(game_state_t *game) {
                 }
             }
             
-            // Check if we've completed one full round
+            // One full round check
             if (current_player == start_player) {
                 all_players_acted = 1;
             }
@@ -603,7 +602,6 @@ int server_bet(game_state_t *game) {
             }
         } else {
             // Invalid action, same player's turn
-            // No need to reset last_info_sent_player since we're staying with the same player
             continue;
         }
     }
@@ -673,7 +671,7 @@ int check_betting_end(game_state_t *game) {
 }
 
 void server_community(game_state_t *game) {
-    // Count how many community cards are already dealt
+    // Count no. of community cards are already dealt
     int card_count = 0;
     for (int i = 0; i < 5; i++) {
         if (game->community_cards[i] != NOCARD) {
@@ -682,8 +680,6 @@ void server_community(game_state_t *game) {
     }
     
     // Deal appropriate cards based on current state
-    // As per assignment: "When dealing the 5 community cards, they should be
-    // the next 5 cards in order (from the deck) after all "ready" players have been given 2 cards."
     if (card_count == 0) {
         // Deal the flop (3 cards)
         game->community_cards[0] = game->deck[game->next_card++];

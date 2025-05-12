@@ -1,3 +1,7 @@
+/*CSE 220 HW5
+  Gatik Yadav
+  115806362
+*/
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>

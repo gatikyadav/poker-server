@@ -1,12 +1,16 @@
+/*CSE 220 HW5
+  Gatik Yadav
+  115806362
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include <sys/time.h>  /* For struct timeval */
-#include <errno.h>     /* Add this line for errno */
-#include <time.h>      /* For time() */
+#include <sys/time.h>  
+#include <errno.h>     
+#include <time.h>      
 
 #include "poker_client.h"
 #include "client_action_handler.h"
@@ -42,7 +46,7 @@ int main(int argc, char **argv) {
     socklen_t addrlen = sizeof(client_address);
     int rand_seed = argc == 2 ? atoi(argv[1]) : (int)time(NULL); // Store random seed for reuse
 
-    // Initialize logging - critical for tests
+    // Initialize logging
     log_init("server");
     log_info("Server starting with seed %d", rand_seed);
 
@@ -95,7 +99,7 @@ int main(int argc, char **argv) {
         // Store the socket descriptor
         game.sockets[i] = client_socket;
         
-        // Verify socket is valid
+        // Verify socket
         if (game.sockets[i] <= 0) {
             log_err("Invalid socket descriptor %d for player %d", game.sockets[i], i);
             exit(EXIT_FAILURE);
@@ -119,7 +123,7 @@ int main(int argc, char **argv) {
         log_info("Restored socket %d for player %d", game.sockets[i], i);
     }
 
-    // Initialize the deck once at program start
+    // Initialize the deck at program start
     init_deck(game.deck, rand_seed);
     
     //Join state
