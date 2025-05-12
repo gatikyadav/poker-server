@@ -71,30 +71,33 @@ int handle_client_action(game_state_t *game, player_id_t pid, const client_packe
         case RAISE: {
             // Get the raise amount from parameters
             int raise_amount = in->params[0];
-            
+    
             // Check if raise amount is valid (greater than current bet)
             if (raise_amount <= g_bet_size) {
                 out->packet_type = NACK;
                 log_info("NACK: Player %d's raise of %d not greater than current bet %d", 
-                       pid, raise_amount, g_bet_size);
-                return -1;
+               pid, raise_amount, g_bet_size);
+                 return -1;
             }
-            
-            // Check if player has enough money
-            int to_raise = raise_amount - g_player_bets[pid];
-            if (to_raise > game->player_stacks[pid]) {
-                out->packet_type = NACK;
-                log_info("NACK: Player %d doesn't have enough chips for raise", pid);
-                return -1;
-            }
-            
-            // Update player stack and bet
-            game->player_stacks[pid] -= to_raise;
-            g_player_bets[pid] += to_raise;
-            g_bet_size = raise_amount;
-            log_info("Player %d raises to %d", pid, raise_amount);
-            break;
-        }
+    
+    // Check if player has enough money for the total amount being bet
+    int to_raise = raise_amount - g_player_bets[pid];
+    if (to_raise > game->player_stacks[pid]) {
+        out->packet_type = NACK;
+        log_info("NACK: Player %d doesn't have enough chips for raise", pid);
+        return -1;
+    }
+    
+    // Update player stack and bet
+    game->player_stacks[pid] -= to_raise;
+    g_player_bets[pid] += to_raise;
+    
+    // This is critical: update the global bet size
+    g_bet_size = raise_amount;
+    
+    log_info("Player %d raises to %d (previous bet: %d)", pid, raise_amount, g_bet_size - to_raise);
+    break;
+}
             
         case FOLD: {
             // Player folds, mark as inactive
